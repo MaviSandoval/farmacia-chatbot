@@ -1,6 +1,7 @@
 """Herramientas que el agente puede usar para consultar la base de la farmacia.
 Cada función devuelve datos simples (listas de diccionarios) para que el modelo
-pueda leerlos y armar la respuesta."""
+pueda leerlos y armar la respuesta. Solo se devuelven datos que se pueden mostrar
+al cliente: por ejemplo, se informa si hay stock, pero no la cantidad."""
 
 import json
 import sqlite3
@@ -18,9 +19,18 @@ def _consultar(sql: str, parametros: list) -> list[dict]:
     return [dict(fila) for fila in filas]
 
 
+def formatear_pesos(valor: float) -> str:
+    """Formatea un número como precio en pesos argentinos: 4100 -> '$ 4.100', 1234.5 -> '$ 1.234,50'."""
+    texto = f"{valor:,.2f}"  # formato inglés: 4,100.00
+    texto = texto.replace(",", "X").replace(".", ",").replace("X", ".")  # formato argentino: 4.100,00
+    if texto.endswith(",00"):
+        texto = texto[:-3]
+    return f"$ {texto}"
+
+
 def buscar_producto(texto: str) -> list[dict]:
     """Busca productos por nombre o principio activo.
-    Devuelve nombre, categoría, precio, stock y si requiere receta."""
+    Devuelve nombre, categoría, precio, si hay stock y si requiere receta."""
     filas = _consultar(
         """
         SELECT p.nombre, p.principio_activo, c.nombre AS categoria,
@@ -33,8 +43,9 @@ def buscar_producto(texto: str) -> list[dict]:
         [f"%{texto}%", f"%{texto}%"],
     )
     for fila in filas:
+        fila["precio"] = formatear_pesos(fila["precio"])
+        fila["hay_stock"] = fila.pop("stock") > 0  # se saca la cantidad y queda solo sí/no
         fila["requiere_receta"] = bool(fila["requiere_receta"])
-        fila["disponible"] = fila["stock"] > 0
     return filas
 
 
@@ -64,8 +75,10 @@ def consultar_cobertura(producto: str, obra_social: str, plan: str | None = None
 
     filas = _consultar(sql, parametros)
     for fila in filas:
+        precio_final = fila["precio"] * (1 - fila["porcentaje"] / 100)
         fila["cubierto"] = fila["porcentaje"] > 0
-        fila["precio_final"] = round(fila["precio"] * (1 - fila["porcentaje"] / 100), 2)
+        fila["precio"] = formatear_pesos(fila["precio"])
+        fila["precio_final"] = formatear_pesos(precio_final)
     return filas
 
 
@@ -76,7 +89,7 @@ def buscar_alternativas(producto: str) -> list[dict]:
     filas = _consultar(
         """
         SELECT alt.nombre, alt.principio_activo, c.nombre AS categoria,
-               alt.precio, alt.stock, alt.requiere_receta,
+               alt.precio, alt.requiere_receta,
                MAX(alt.principio_activo = orig.principio_activo) AS mismo_principio_activo
         FROM productos orig
         JOIN productos alt ON alt.categoria_id = orig.categoria_id AND alt.id <> orig.id
@@ -89,6 +102,7 @@ def buscar_alternativas(producto: str) -> list[dict]:
         [f"%{producto}%", f"%{producto}%"],
     )
     for fila in filas:
+        fila["precio"] = formatear_pesos(fila["precio"])
         fila["requiere_receta"] = bool(fila["requiere_receta"])
         fila["mismo_principio_activo"] = bool(fila["mismo_principio_activo"])
     return filas
@@ -101,5 +115,4 @@ if __name__ == "__main__":
 
     mostrar("buscar_producto('ibuprofeno')", buscar_producto("ibuprofeno"))
     mostrar("consultar_cobertura('amoxicilina', 'osde')", consultar_cobertura("amoxicilina", "osde"))
-    mostrar("consultar_cobertura('loratadina', 'ioscor')", consultar_cobertura("loratadina", "ioscor"))
     mostrar("buscar_alternativas('diclofenac')", buscar_alternativas("diclofenac"))
