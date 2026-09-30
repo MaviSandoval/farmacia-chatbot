@@ -6,7 +6,7 @@ from agente import PROMPT_SISTEMA, responder
 
 st.set_page_config(page_title="Asistente de Farmacia", page_icon="💊")
 st.title("💊 Asistente de Farmacia")
-st.caption("Demo: consultá stock, precios, coberturas de obras sociales y alternativas. Datos ficticios.")
+st.caption("Demo: consultá productos (medicamentos, perfumería, higiene, bebés y más), precios, stock, coberturas de obras sociales y alternativas. Datos ficticios.")
 
 
 def mostrar(texto: str) -> None:

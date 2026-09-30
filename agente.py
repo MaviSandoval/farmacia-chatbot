@@ -7,7 +7,12 @@ import os
 from dotenv import load_dotenv
 from groq import Groq
 
-from herramientas import buscar_alternativas, buscar_producto, consultar_cobertura
+from herramientas import (
+    buscar_alternativas,
+    buscar_producto,
+    consultar_cobertura,
+    listar_obras_sociales,
+)
 
 load_dotenv()
 
@@ -31,20 +36,30 @@ MODELO = "openai/gpt-oss-120b"
 MAX_PASOS = 5  # tope de idas y vueltas con herramientas, para evitar loops infinitos
 
 PROMPT_SISTEMA = """Sos el asistente virtual de atención al cliente de una farmacia.
-Respondé en español rioplatense, de forma breve y amable.
+Respondé en español rioplatense (usá "vos": querés, podés, acercate), de forma breve y amable.
+La farmacia vende medicamentos, perfumería, higiene, dermocosmética, productos para bebés y más.
 
 Reglas:
-- Para stock, precios, coberturas o alternativas, usá SIEMPRE las herramientas. Nunca inventes datos.
+- Para productos, stock, precios, coberturas, obras sociales o alternativas, usá SIEMPRE las
+  herramientas. Nunca inventes datos.
 - Solo informás: no ofrezcas reservas, compras, envíos ni ninguna acción que no puedas hacer.
   Si el cliente quiere comprar, indicale que se acerque a la farmacia.
 - Mostrá los precios tal como vienen de las herramientas (pesos argentinos, ej: $ 4.100).
 - Sobre el stock, decí solo si hay o no hay; nunca informes cantidades.
-- Si un producto requiere receta, avisalo.
-- Si preguntan por cobertura y no dicen la obra social, preguntala.
+- Si un resultado tiene coincidencia_aproximada en true, aclaralo: por ejemplo,
+  "No encontré 'amoxicilna', pero tengo Amoxicilina 500 mg".
+- Condición de venta: si es "Bajo receta", avisá que necesita receta; si es "Bajo receta
+  archivada", aclará que la farmacia se queda con la receta original.
+- Coberturas: solo se cubren medicamentos bajo receta. Los productos de venta libre,
+  perfumería, higiene, etc. no tienen cobertura. Aclará que el descuento es orientativo y
+  que la farmacia lo confirma al validar la receta y la credencial.
+- Si preguntan por cobertura y no dicen la obra social, preguntala. Si la obra social tiene
+  varios planes y no dicen cuál, mostrá los planes o preguntá el plan.
 - Si un producto no tiene stock, ofrecé alternativas con buscar_alternativas, pero aclará que
   cambiar de medicamento (sobre todo si es otro principio activo) debe consultarse con el
   farmacéutico o el médico.
-- No des diagnósticos ni indiques dosis: derivá al farmacéutico o al médico.
+- No des diagnósticos, no recomiendes medicamentos para síntomas ni indiques dosis: derivá al
+  farmacéutico o al médico. Podés informar qué productos hay de una categoría si te lo piden.
 - Si la consulta no tiene que ver con la farmacia, decilo amablemente."""
 
 
@@ -54,11 +69,18 @@ HERRAMIENTAS = [
         "type": "function",
         "function": {
             "name": "buscar_producto",
-            "description": "Busca productos por nombre o principio activo. Devuelve precio, stock y si requiere receta.",
+            "description": (
+                "Busca productos del catálogo (medicamentos, perfumería, higiene, bebés, etc.) por nombre, "
+                "marca, principio activo o categoría. Tolera tildes y errores de tipeo. Devuelve precio, "
+                "si hay stock y la condición de venta."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "texto": {"type": "string", "description": "Nombre o principio activo, ej: 'ibuprofeno 600'"},
+                    "texto": {
+                        "type": "string",
+                        "description": "Palabras clave, ej: 'ibuprofeno 600', 'protector solar', 'pañales talle G'",
+                    },
                 },
                 "required": ["texto"],
             },
@@ -68,16 +90,27 @@ HERRAMIENTAS = [
         "type": "function",
         "function": {
             "name": "consultar_cobertura",
-            "description": "Indica si una obra social cubre un producto, con el porcentaje de descuento y el precio final.",
+            "description": (
+                "Indica si una obra social cubre un producto, con el porcentaje de descuento y el precio final. "
+                "Si la obra social o el plan no existen, devuelve un error con las opciones disponibles."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "producto": {"type": "string", "description": "Nombre o principio activo del producto"},
-                    "obra_social": {"type": "string", "description": "Nombre de la obra social, ej: 'OSDE'"},
-                    "plan": {"type": "string", "description": "Plan de la obra social (opcional), ej: '210'"},
+                    "producto": {"type": "string", "description": "Nombre, marca o principio activo del producto"},
+                    "obra_social": {"type": "string", "description": "Nombre de la obra social, ej: 'OSDE', 'PAMI'"},
+                    "plan": {"type": "string", "description": "Plan de la obra social (opcional), ej: '210', 'Jubilado'"},
                 },
                 "required": ["producto", "obra_social"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "listar_obras_sociales",
+            "description": "Lista las obras sociales y prepagas con las que trabaja la farmacia, con sus planes.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -100,6 +133,7 @@ HERRAMIENTAS = [
 FUNCIONES = {
     "buscar_producto": buscar_producto,
     "consultar_cobertura": consultar_cobertura,
+    "listar_obras_sociales": listar_obras_sociales,
     "buscar_alternativas": buscar_alternativas,
 }
 
