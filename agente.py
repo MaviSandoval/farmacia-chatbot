@@ -10,7 +10,22 @@ from groq import Groq
 from herramientas import buscar_alternativas, buscar_producto, consultar_cobertura
 
 load_dotenv()
-cliente = Groq(api_key=os.environ["GROQ_API_KEY"])
+
+def _obtener_clave() -> str:
+    """Busca la clave en el .env (local) o en los Secrets de Streamlit Cloud."""
+    clave = os.environ.get("GROQ_API_KEY")
+    if not clave:
+        try:
+            import streamlit as st
+            clave = st.secrets["GROQ_API_KEY"]
+        except Exception:
+            pass
+    if not clave:
+        raise RuntimeError("Falta GROQ_API_KEY: configurala en el archivo .env o en los Secrets de Streamlit.")
+    return clave
+
+
+cliente = Groq(api_key=_obtener_clave())
 
 MODELO = "openai/gpt-oss-120b"
 MAX_PASOS = 5  # tope de idas y vueltas con herramientas, para evitar loops infinitos
