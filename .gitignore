@@ -1,0 +1,12 @@
+# Entorno virtual
+venv/
+
+# Archivos compilados de Python
+__pycache__/
+*.pyc
+
+# Claves de API (nunca subirlas)
+.env
+
+# VS Code
+.vscode/
