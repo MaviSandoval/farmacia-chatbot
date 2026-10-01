@@ -1,0 +1,26 @@
+# Configuración para publicar los bots de WhatsApp y Telegram en Render (render.com).
+# En Render: New > Blueprint > elegir este repositorio. Las claves se cargan a mano
+# en el panel (sync: false), nunca se suben a GitHub.
+services:
+  - type: web
+    name: farmacia-bots
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn servidor:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_SECRET
+        sync: false
