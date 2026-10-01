@@ -2,7 +2,10 @@
 
 import pytest
 
+from datetime import datetime
+
 from herramientas import (
+    _info_farmacia,
     buscar_alternativas,
     buscar_producto,
     consultar_cobertura,
@@ -66,7 +69,7 @@ def test_corrige_errores_de_tipeo_y_lo_indica():
 def test_no_encuentra_palabras_dentro_de_otras():
     # 'tos' no debe coincidir con 'medicamen-tos': solo aparecen productos para la tos
     resultados = buscar_producto("algo para la tos")
-    assert resultados[0]["nombre"] == "Jarabe para la tos seca x 120 ml"
+    assert resultados[0]["nombre"] == "Jarabe para la tos seca x 150 ml"
     assert all(r["categoria"] == "Tos, gripe y respiratorio" for r in resultados)
 
 
@@ -96,10 +99,19 @@ def test_indica_si_no_hay_stock():
     assert actron["hay_stock"] is False
 
 
-def test_informa_condicion_de_venta():
-    assert buscar_producto("tafirol")[0]["condicion_venta"] == "Venta libre"
-    assert buscar_producto("amoxidal")[0]["condicion_venta"] == "Bajo receta"
-    assert buscar_producto("clonazepam")[0]["condicion_venta"] == "Bajo receta archivada"
+@pytest.mark.parametrize("texto, condicion", [
+    ("tafirol", "Venta libre"),
+    ("amoxidal", "Bajo receta"),
+    ("clonazepam", "Bajo receta archivada"),
+    # Casos verificados en fuentes argentinas: depende de la dosis y del envase
+    ("omeprazol 20 mg x 14", "Venta libre"),
+    ("omeprazol 20 mg x 28", "Bajo receta"),
+    ("allegra 120", "Venta libre"),
+    ("allegra 180", "Bajo receta"),
+    ("jarabe tos seca", "Bajo receta archivada"),  # dextrometorfano
+])
+def test_informa_condicion_de_venta(texto, condicion):
+    assert buscar_producto(texto)[0]["condicion_venta"] == condicion
 
 
 # ---------------------------------------------------------------- coberturas
@@ -176,7 +188,7 @@ def test_alternativas_tienen_stock_y_son_de_la_misma_categoria():
     alternativas = buscar_alternativas("cetirizina")
     assert alternativas
     assert all(a["categoria"] == "Antialérgicos" for a in alternativas)
-    assert "Cetirizina 10 mg x 10 comprimidos" not in nombres(alternativas)
+    assert "Cetirizina 10 mg x 10 cápsulas blandas" not in nombres(alternativas)
     # Solo se ofrecen productos disponibles: los sin stock no deben aparecer
     assert "Levotiroxina 100 mcg x 50 comprimidos" not in nombres(alternativas)
 
@@ -189,6 +201,39 @@ def test_alternativas_priorizan_mismo_principio_activo():
 
 def test_alternativas_de_producto_inexistente():
     assert buscar_alternativas("xyz") == []
+
+
+# ---------------------------------------------------------------- información de la farmacia
+
+def sucursal(info: dict, nombre: str) -> dict:
+    return next(s for s in info["sucursales"] if s["nombre"] == nombre)
+
+
+def test_sucursal_abierta_en_horario():
+    info = _info_farmacia(datetime(2026, 10, 1, 10, 0))  # jueves 10:00
+    assert info["dia_y_hora_actual"] == "Jueves 10:00"
+    assert sucursal(info, "Sucursal Centro")["abierta_ahora"] is True
+    assert sucursal(info, "Sucursal Norte")["abierta_ahora"] is True
+
+
+def test_sucursal_cerrada_a_la_hora_de_cierre():
+    info = _info_farmacia(datetime(2026, 10, 1, 20, 0))  # jueves 20:00, Norte cierra a las 20
+    assert sucursal(info, "Sucursal Norte")["abierta_ahora"] is False
+    assert sucursal(info, "Sucursal Centro")["abierta_ahora"] is True
+
+
+def test_domingo_solo_abre_el_centro_a_la_manana():
+    info = _info_farmacia(datetime(2026, 10, 4, 10, 30))  # domingo
+    assert sucursal(info, "Sucursal Centro")["horario_de_hoy"] == "09:00 a 13:00"
+    assert sucursal(info, "Sucursal Norte")["horario_de_hoy"] == "Cerrado"
+    assert sucursal(info, "Sucursal Norte")["abierta_ahora"] is False
+
+
+def test_info_incluye_pagos_y_servicios():
+    info = _info_farmacia(datetime(2026, 10, 1, 10, 0))
+    assert "Efectivo" in info["medios_de_pago"]
+    assert any(s.startswith("Toma de presión") for s in info["servicios"])
+    assert len(sucursal(info, "Sucursal Centro")["horarios"]) == 7
 
 
 # ---------------------------------------------------------------- integridad de los datos

@@ -6,7 +6,12 @@ Las coberturas siguen el esquema general de Argentina (simplificado para la demo
 - Los medicamentos bajo receta se cubren según su tipo de tratamiento:
     ambulatorio (uso eventual) ~40 %, crónico ~60-70 %, especial 100 %
     (diabetes y anticonceptivos, según el Programa Médico Obligatorio).
-En la realidad cada obra social tiene su propio vademécum: estos valores son orientativos."""
+En la realidad cada obra social tiene su propio vademécum: estos valores son orientativos.
+
+La condición de venta (venta libre, bajo receta o bajo receta archivada) se verificó con
+el listado de venta libre de ANMAT, prospectos de los laboratorios y alfabeta.net (sep. 2026).
+Depende de la dosis y del tamaño del envase: por ejemplo, el omeprazol 20 mg x 14 es de venta
+libre, pero el envase x 28 es bajo receta."""
 
 import sqlite3
 from pathlib import Path
@@ -172,25 +177,27 @@ PRODUCTOS = [
     ("Levotiroxina 100 mcg x 50 comprimidos", "T4 Montpellier", "Levotiroxina", "Tiroides", 5900, 0, BR, CRO),
 
     # --- Respiratorio ---
-    ("Salbutamol aerosol 100 mcg x 200 dosis", "Salbutral", "Salbutamol", "Tos, gripe y respiratorio", 8700, 10, BR, CRO),
-    ("Budesonida spray nasal 64 mcg x 120 dosis", "Genérico", "Budesonida", "Tos, gripe y respiratorio", 9800, 7, BR, AMB),
-    ("Jarabe para la tos seca x 120 ml", "Genérico", "Dextrometorfano", "Tos, gripe y respiratorio", 5600, 20, VL, None),
+    ("Salbutamol aerosol 100 mcg x 250 dosis", "Salbutral", "Salbutamol", "Tos, gripe y respiratorio", 8700, 10, BR, CRO),
+    ("Fluticasona spray nasal 50 mcg", "Alernix Cort", "Fluticasona", "Tos, gripe y respiratorio", 9800, 7, VL, None),
+    ("Jarabe para la tos seca x 150 ml", "Genérico", "Dextrometorfano", "Tos, gripe y respiratorio", 5600, 20, BRA, AMB),
     ("Bromhexina jarabe x 120 ml", "Bisolvon", "Bromhexina", "Tos, gripe y respiratorio", 5100, 15, VL, None),
-    ("Antigripal x 12 comprimidos", "Next", "Paracetamol / Fenilefrina / Clorfeniramina", "Tos, gripe y respiratorio", 4400, 35, VL, None),
+    ("Antigripal x 10 comprimidos", "Next", "Paracetamol / Fenilefrina / Clorfeniramina", "Tos, gripe y respiratorio", 4400, 35, VL, None),
 
     # --- Antialérgicos ---
     ("Loratadina 10 mg x 10 comprimidos", "Genérico", "Loratadina", "Antialérgicos", 2900, 35, VL, None),
-    ("Cetirizina 10 mg x 10 comprimidos", "Alercet", "Cetirizina", "Antialérgicos", 3100, 0, VL, None),
+    ("Cetirizina 10 mg x 10 cápsulas blandas", "Alernix", "Cetirizina", "Antialérgicos", 3100, 0, VL, None),
     ("Desloratadina 5 mg x 10 comprimidos", "Genérico", "Desloratadina", "Antialérgicos", 4600, 20, BR, AMB),
+    # Fexofenadina: 60 y 120 mg son de venta libre desde la Disposición ANMAT 4714/2026; 180 mg sigue bajo receta
+    ("Fexofenadina 120 mg x 10 comprimidos", "Allegra", "Fexofenadina", "Antialérgicos", 6900, 15, VL, None),
     ("Fexofenadina 180 mg x 10 comprimidos", "Allegra", "Fexofenadina", "Antialérgicos", 7900, 12, BR, AMB),
 
     # --- Aparato digestivo ---
-    ("Omeprazol 20 mg x 14 cápsulas", "Genérico", "Omeprazol", "Acidez y digestivo", 3600, 40, BR, AMB),
+    ("Omeprazol 20 mg x 14 cápsulas", "Genérico", "Omeprazol", "Acidez y digestivo", 3600, 40, VL, None),
     ("Omeprazol 20 mg x 28 cápsulas", "Ulcozol", "Omeprazol", "Acidez y digestivo", 6100, 10, BR, AMB),
     ("Famotidina 20 mg x 20 comprimidos", "Genérico", "Famotidina", "Acidez y digestivo", 3300, 15, BR, AMB),
     ("Trimebutina 200 mg x 30 comprimidos", "Genérico", "Trimebutina", "Acidez y digestivo", 7400, 0, BR, AMB),
-    ("Antiácido masticable x 12 comprimidos", "Mylanta", "Hidróxido de aluminio / Hidróxido de magnesio", "Acidez y digestivo", 3400, 30, VL, None),
-    ("Loperamida 2 mg x 6 comprimidos", "Genérico", "Loperamida", "Acidez y digestivo", 2200, 25, VL, None),
+    ("Antiácido masticable x 24 comprimidos", "Mylanta", "Carbonato de calcio y asociados", "Acidez y digestivo", 6800, 30, VL, None),
+    ("Loperamida 2 mg x 10 comprimidos", "Loperapid", "Loperamida", "Acidez y digestivo", 3100, 25, VL, None),
     ("Sales de rehidratación oral x 10 sobres", "Genérico", "Sales de rehidratación oral", "Acidez y digestivo", 2800, 20, VL, None),
 
     # --- Salud mental ---
@@ -204,7 +211,7 @@ PRODUCTOS = [
     ("Drospirenona + etinilestradiol x 28 comprimidos", "Genérico", "Drospirenona / Etinilestradiol", "Anticonceptivos", 11800, 9, BR, ESP),
 
     # --- Dermatológicos ---
-    ("Clotrimazol crema 1 % x 20 g", "Genérico", "Clotrimazol", "Dermatológicos", 3700, 14, VL, None),
+    ("Clotrimazol crema 1 % x 20 g", "Empecid", "Clotrimazol", "Dermatológicos", 3700, 14, VL, None),
     ("Aciclovir crema 5 % x 10 g", "Genérico", "Aciclovir", "Dermatológicos", 3900, 9, VL, None),
     ("Betametasona crema 0,05 % x 15 g", "Genérico", "Betametasona", "Dermatológicos", 4200, 10, BR, AMB),
     ("Mupirocina ungüento 2 % x 15 g", "Genérico", "Mupirocina", "Dermatológicos", 6800, 0, BR, AMB),
