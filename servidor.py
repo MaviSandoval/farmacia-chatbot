@@ -356,7 +356,11 @@ async def recibir_twilio(request: Request, tareas: BackgroundTasks) -> Response:
     cuerpo = (await request.body()).decode()
     parametros = dict(parse_qsl(cuerpo, keep_blank_values=True))
     firma = request.headers.get("X-Twilio-Signature")
-    if not firma_twilio_valida(url_publica("/twilio", request), parametros, firma):
+    url = url_publica("/twilio", request)
+    if not firma_twilio_valida(url, parametros, firma):
+        # Diagnóstico sin mostrar secretos: qué URL se usó y si hay token configurado
+        print(f"  [twilio] firma inválida (url usada: {url}, token configurado: "
+              f"{bool(os.environ.get('TWILIO_AUTH_TOKEN'))}, firma recibida: {bool(firma)})")
         raise HTTPException(status_code=401, detail="Firma inválida")
 
     if "From" in parametros and not es_repetido(f"twilio:{parametros.get('MessageSid')}"):
