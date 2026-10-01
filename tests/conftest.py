@@ -3,10 +3,16 @@
 Cada test usa una base de datos NUEVA creada en una carpeta temporal, así los tests
 no dependen de farmacia_demo.db ni la modifican."""
 
+import dotenv
 import pytest
 
-import crear_bd
-import herramientas
+# Los tests nunca leen el .env real: así no dependen de las claves de quien los corre
+# (por ejemplo, un TELEGRAM_SECRET cargado haría fallar los tests de Telegram).
+# Tiene que ir antes de importar agente.py o servidor.py, que llaman a load_dotenv().
+dotenv.load_dotenv = lambda *args, **kwargs: False
+
+import crear_bd  # noqa: E402
+import herramientas  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
