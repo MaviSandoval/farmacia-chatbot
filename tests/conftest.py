@@ -25,7 +25,8 @@ def servidor(monkeypatch):
     Devuelve (módulo, cliente_http, enviados), donde enviados guarda (canal, destino, texto)."""
     monkeypatch.setenv("GROQ_API_KEY", "clave-de-prueba")
     monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", "token-secreto")
-    for variable in ("WHATSAPP_APP_SECRET", "TELEGRAM_TOKEN", "TELEGRAM_SECRET", "URL_PUBLICA", "RENDER_EXTERNAL_URL"):
+    for variable in ("WHATSAPP_APP_SECRET", "TELEGRAM_TOKEN", "TELEGRAM_SECRET", "URL_PUBLICA",
+                     "RENDER_EXTERNAL_URL", "TWILIO_AUTH_TOKEN", "TWILIO_ACCOUNT_SID", "TWILIO_WHATSAPP_FROM"):
         monkeypatch.delenv(variable, raising=False)
 
     from fastapi.testclient import TestClient
@@ -38,6 +39,7 @@ def servidor(monkeypatch):
     enviados = []
     monkeypatch.setattr(modulo, "enviar_whatsapp", lambda numero, texto: enviados.append(("whatsapp", numero, texto)))
     monkeypatch.setattr(modulo, "enviar_telegram", lambda chat, texto: enviados.append(("telegram", chat, texto)))
+    monkeypatch.setattr(modulo, "enviar_twilio", lambda destino, texto: enviados.append(("twilio", destino, texto)))
     monkeypatch.setattr(modulo, "mostrar_escribiendo", lambda chat: None)
 
     def responder_falso(mensajes):

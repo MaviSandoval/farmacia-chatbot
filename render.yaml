@@ -20,6 +20,10 @@ services:
         sync: false
       - key: WHATSAPP_APP_SECRET
         sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
       - key: TELEGRAM_TOKEN
         sync: false
       - key: TELEGRAM_SECRET

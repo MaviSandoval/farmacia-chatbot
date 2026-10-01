@@ -4,6 +4,7 @@ Los dos canales usan el MISMO agente que la web (agente.responder). Solo cambia 
 llega el mensaje y cómo se envía la respuesta:
 
     WhatsApp:  Meta     -> POST /whatsapp -> agente -> API de Meta     -> cliente
+    WhatsApp:  Twilio   -> POST /twilio   -> agente -> API de Twilio   -> cliente  (alternativa a Meta)
     Telegram:  Telegram -> POST /telegram -> agente -> API de Telegram -> cliente
 
 Ejecutar localmente:  uvicorn servidor:app --reload
@@ -13,24 +14,30 @@ Variables de entorno (en .env o en el hosting); cada canal se activa si están s
     WHATSAPP_PHONE_NUMBER_ID  id del número de WhatsApp (no es el número de teléfono)
     WHATSAPP_VERIFY_TOKEN     texto que inventás vos, para que Meta verifique el webhook
     WHATSAPP_APP_SECRET       (opcional) clave secreta de la app de Meta, para validar los avisos
+    TWILIO_ACCOUNT_SID        identificador de la cuenta de Twilio (empieza con AC)
+    TWILIO_AUTH_TOKEN         clave de la cuenta de Twilio; también valida que los avisos vienen de Twilio
+    TWILIO_WHATSAPP_FROM      (opcional) número de WhatsApp de Twilio; por defecto, el del Sandbox
     TELEGRAM_TOKEN            token del bot que da @BotFather
     TELEGRAM_SECRET           (opcional) texto que inventás vos, para validar los avisos de Telegram
     URL_PUBLICA               (opcional) URL del servidor; en Render se usa RENDER_EXTERNAL_URL solo
 """
 
+import base64
 import hashlib
 import hmac
 import json
 import os
 import re
 import threading
+import time
+from urllib.parse import parse_qsl
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 
 from agente import PROMPT_SISTEMA, SALUDO, responder
 
@@ -183,6 +190,57 @@ def procesar_whatsapp(mensaje: dict) -> None:
     enviar_whatsapp(numero, responder_cliente(f"whatsapp:{numero}", texto))
 
 
+# ================================================================ WhatsApp por Twilio (alternativa a Meta)
+
+NUMERO_SANDBOX_TWILIO = "whatsapp:+14155238886"
+MAX_LARGO_TWILIO = 1600         # Twilio corta los mensajes de WhatsApp en 1600 caracteres
+ESPERA_ENTRE_MENSAJES = 3       # el Sandbox permite un mensaje cada 3 segundos
+
+
+def url_publica(ruta: str, request: Request) -> str:
+    """URL pública con la que la plataforma llamó al servidor. Detrás del proxy de Render,
+    request.url puede figurar como http://, por eso se prefiere la URL pública configurada."""
+    base = os.environ.get("URL_PUBLICA") or os.environ.get("RENDER_EXTERNAL_URL")
+    return f"{base.rstrip('/')}{ruta}" if base else str(request.url)
+
+
+def firma_twilio_valida(url: str, parametros: dict[str, str], firma: str | None) -> bool:
+    """Verifica que el aviso viene de Twilio. La firma es un HMAC-SHA1, en base64, de la URL
+    seguida de cada parámetro (ordenados por nombre) pegado a su valor, con el Auth Token como clave."""
+    token = os.environ.get("TWILIO_AUTH_TOKEN")
+    if not token or not firma:
+        return False
+    datos = url + "".join(clave + parametros[clave] for clave in sorted(parametros))
+    esperada = base64.b64encode(hmac.new(token.encode(), datos.encode(), hashlib.sha1).digest()).decode()
+    return hmac.compare_digest(esperada, firma)
+
+
+def enviar_twilio(destino: str, texto: str) -> None:
+    """Envía un mensaje de WhatsApp con la API de Twilio. destino viene como 'whatsapp:+549...'."""
+    sid = os.environ["TWILIO_ACCOUNT_SID"]
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
+    origen = os.environ.get("TWILIO_WHATSAPP_FROM", NUMERO_SANDBOX_TWILIO)
+    partes = partir_mensaje(a_formato_whatsapp(texto), MAX_LARGO_TWILIO)
+    for indice, parte in enumerate(partes):
+        if indice:
+            time.sleep(ESPERA_ENTRE_MENSAJES)
+        respuesta = httpx.post(url, auth=(sid, os.environ["TWILIO_AUTH_TOKEN"]), timeout=20,
+                               data={"From": origen, "To": destino, "Body": parte})
+        if respuesta.status_code >= 400:
+            print(f"  [twilio] error al enviar a {destino}: {respuesta.status_code} {respuesta.text}")
+
+
+def procesar_twilio(parametros: dict[str, str]) -> None:
+    """Responde un mensaje que llegó por Twilio. Corre en segundo plano."""
+    destino = parametros["From"]
+    texto = parametros.get("Body", "").strip()
+    if not texto:  # foto, audio, ubicación, etc.
+        enviar_twilio(destino, MENSAJE_SOLO_TEXTO)
+        return
+    print(f"  [{destino}] {texto}")
+    enviar_twilio(destino, responder_cliente(f"twilio:{destino}", texto))
+
+
 # ================================================================ Telegram
 
 def a_texto_telegram(texto: str) -> str:
@@ -286,6 +344,21 @@ async def recibir_whatsapp(request: Request, tareas: BackgroundTasks) -> dict:
         if not es_repetido(f"whatsapp:{mensaje['id']}"):
             tareas.add_task(procesar_whatsapp, mensaje)
     return {"estado": "recibido"}
+
+
+@app.post("/twilio")
+async def recibir_twilio(request: Request, tareas: BackgroundTasks) -> Response:
+    """Recibe los avisos de Twilio (formulario, no JSON). Responde enseguida con un TwiML vacío
+    (Twilio espera XML) y manda la respuesta del agente después, por la API."""
+    cuerpo = (await request.body()).decode()
+    parametros = dict(parse_qsl(cuerpo, keep_blank_values=True))
+    firma = request.headers.get("X-Twilio-Signature")
+    if not firma_twilio_valida(url_publica("/twilio", request), parametros, firma):
+        raise HTTPException(status_code=401, detail="Firma inválida")
+
+    if "From" in parametros and not es_repetido(f"twilio:{parametros.get('MessageSid')}"):
+        tareas.add_task(procesar_twilio, parametros)
+    return Response(content="<Response></Response>", media_type="text/xml")
 
 
 @app.post("/telegram")
