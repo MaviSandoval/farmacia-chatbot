@@ -4,7 +4,7 @@ Los dos canales usan el MISMO agente que la web (agente.responder). Solo cambia 
 llega el mensaje y cómo se envía la respuesta:
 
     WhatsApp:  Meta     -> POST /whatsapp -> agente -> API de Meta     -> cliente
-    WhatsApp:  Twilio   -> POST /twilio   -> agente -> API de Twilio   -> cliente  (alternativa a Meta)
+    WhatsApp:  Twilio   -> POST /twilio   -> agente -> respuesta TwiML -> cliente  (alternativa a Meta)
     Telegram:  Telegram -> POST /telegram -> agente -> API de Telegram -> cliente
 
 Ejecutar localmente:  uvicorn servidor:app --reload
@@ -14,14 +14,13 @@ Variables de entorno (en .env o en el hosting); cada canal se activa si están s
     WHATSAPP_PHONE_NUMBER_ID  id del número de WhatsApp (no es el número de teléfono)
     WHATSAPP_VERIFY_TOKEN     texto que inventás vos, para que Meta verifique el webhook
     WHATSAPP_APP_SECRET       (opcional) clave secreta de la app de Meta, para validar los avisos
-    TWILIO_ACCOUNT_SID        identificador de la cuenta de Twilio (empieza con AC)
-    TWILIO_AUTH_TOKEN         clave de la cuenta de Twilio; también valida que los avisos vienen de Twilio
-    TWILIO_WHATSAPP_FROM      (opcional) número de Twilio para responder si el aviso no lo trae
+    TWILIO_AUTH_TOKEN         clave de la cuenta de Twilio, para validar que los avisos vienen de Twilio
     TELEGRAM_TOKEN            token del bot que da @BotFather
     TELEGRAM_SECRET           (opcional) texto que inventás vos, para validar los avisos de Telegram
     URL_PUBLICA               (opcional) URL del servidor; en Render se usa RENDER_EXTERNAL_URL solo
 """
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -29,14 +28,15 @@ import json
 import os
 import re
 import threading
-import time
 from urllib.parse import parse_qsl
+from xml.sax.saxutils import escape
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse, Response
 
 from agente import PROMPT_SISTEMA, SALUDO, responder
@@ -192,9 +192,13 @@ def procesar_whatsapp(mensaje: dict) -> None:
 
 # ================================================================ WhatsApp por Twilio (alternativa a Meta)
 
-NUMERO_SANDBOX_TWILIO = "whatsapp:+14155238886"
+# La respuesta va dentro de la misma respuesta HTTP del webhook (TwiML), no por la API:
+# la cuenta de prueba de Twilio solo deja enviar mensajes libres de esa forma (por la API
+# exige plantillas aprobadas, error 21654). Twilio espera como máximo 15 segundos.
 MAX_LARGO_TWILIO = 1600         # Twilio corta los mensajes de WhatsApp en 1600 caracteres
-ESPERA_ENTRE_MENSAJES = 3       # el Sandbox permite un mensaje cada 3 segundos
+ESPERA_MAXIMA_TWILIO = 13       # segundos; un poco menos que el límite de Twilio
+MENSAJE_DEMORA = ("Estoy tardando más de lo normal en responder 😅 "
+                  "Probá escribirme de nuevo en un momento.")
 
 
 def url_publica(ruta: str, request: Request) -> str:
@@ -215,33 +219,21 @@ def firma_twilio_valida(url: str, parametros: dict[str, str], firma: str | None)
     return hmac.compare_digest(esperada, firma)
 
 
-def enviar_twilio(destino: str, texto: str, origen: str | None = None) -> None:
-    """Envía un mensaje de WhatsApp con la API de Twilio. destino viene como 'whatsapp:+549...'.
-    origen es el número de Twilio desde el que se responde: por defecto, el mismo al que escribió
-    el cliente; si no se conoce, TWILIO_WHATSAPP_FROM o el número clásico del Sandbox."""
-    sid = os.environ["TWILIO_ACCOUNT_SID"]
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
-    origen = origen or os.environ.get("TWILIO_WHATSAPP_FROM", NUMERO_SANDBOX_TWILIO)
-    partes = partir_mensaje(a_formato_whatsapp(texto), MAX_LARGO_TWILIO)
-    for indice, parte in enumerate(partes):
-        if indice:
-            time.sleep(ESPERA_ENTRE_MENSAJES)
-        respuesta = httpx.post(url, auth=(sid, os.environ["TWILIO_AUTH_TOKEN"]), timeout=20,
-                               data={"From": origen, "To": destino, "Body": parte})
-        if respuesta.status_code >= 400:
-            print(f"  [twilio] error al enviar a {destino}: {respuesta.status_code} {respuesta.text}")
+def twiml(mensajes: list[str]) -> str:
+    """Arma la respuesta en TwiML (el XML de Twilio) con uno o más mensajes de WhatsApp."""
+    cuerpo = "".join(f"<Message>{escape(mensaje)}</Message>" for mensaje in mensajes)
+    return f'<?xml version="1.0" encoding="UTF-8"?><Response>{cuerpo}</Response>'
 
 
-def procesar_twilio(parametros: dict[str, str]) -> None:
-    """Responde un mensaje que llegó por Twilio. Corre en segundo plano."""
+def respuesta_twilio(parametros: dict[str, str]) -> list[str]:
+    """Arma los mensajes de respuesta para un aviso de Twilio. Corre en un hilo aparte."""
     destino = parametros["From"]
-    origen = parametros.get("To")  # se responde desde el número de Twilio al que escribió el cliente
     texto = parametros.get("Body", "").strip()
     if not texto:  # foto, audio, ubicación, etc.
-        enviar_twilio(destino, MENSAJE_SOLO_TEXTO, origen)
-        return
+        return [MENSAJE_SOLO_TEXTO]
     print(f"  [{destino}] {texto}")
-    enviar_twilio(destino, responder_cliente(f"twilio:{destino}", texto), origen)
+    respuesta = responder_cliente(f"twilio:{destino}", texto)
+    return partir_mensaje(a_formato_whatsapp(respuesta), MAX_LARGO_TWILIO)
 
 
 # ================================================================ Telegram
@@ -350,9 +342,9 @@ async def recibir_whatsapp(request: Request, tareas: BackgroundTasks) -> dict:
 
 
 @app.post("/twilio")
-async def recibir_twilio(request: Request, tareas: BackgroundTasks) -> Response:
-    """Recibe los avisos de Twilio (formulario, no JSON). Responde enseguida con un TwiML vacío
-    (Twilio espera XML) y manda la respuesta del agente después, por la API."""
+async def recibir_twilio(request: Request) -> Response:
+    """Recibe los avisos de Twilio (formulario, no JSON) y responde con TwiML (XML) que
+    contiene el mensaje del agente. Twilio lo entrega por WhatsApp al cliente."""
     cuerpo = (await request.body()).decode()
     parametros = dict(parse_qsl(cuerpo, keep_blank_values=True))
     firma = request.headers.get("X-Twilio-Signature")
@@ -363,9 +355,17 @@ async def recibir_twilio(request: Request, tareas: BackgroundTasks) -> Response:
               f"{bool(os.environ.get('TWILIO_AUTH_TOKEN'))}, firma recibida: {bool(firma)})")
         raise HTTPException(status_code=401, detail="Firma inválida")
 
-    if "From" in parametros and not es_repetido(f"twilio:{parametros.get('MessageSid')}"):
-        tareas.add_task(procesar_twilio, parametros)
-    return Response(content="<Response></Response>", media_type="text/xml")
+    if "From" not in parametros or es_repetido(f"twilio:{parametros.get('MessageSid')}"):
+        return Response(content=twiml([]), media_type="text/xml")
+
+    try:
+        # El agente es código sincrónico: se corre en otro hilo para no bloquear el servidor
+        mensajes = await asyncio.wait_for(run_in_threadpool(respuesta_twilio, parametros),
+                                          timeout=ESPERA_MAXIMA_TWILIO)
+    except TimeoutError:
+        print(f"  [twilio] el agente tardó más de {ESPERA_MAXIMA_TWILIO} s")
+        mensajes = [MENSAJE_DEMORA]
+    return Response(content=twiml(mensajes), media_type="text/xml")
 
 
 @app.post("/telegram")

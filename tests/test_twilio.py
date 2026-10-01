@@ -1,9 +1,12 @@
 """Tests del canal de WhatsApp por Twilio. Simulan los avisos que manda Twilio (formulario
-firmado), sin cuenta real, sin internet y sin llamar a Groq (ver la fixture 'servidor')."""
+firmado), sin cuenta real, sin internet y sin llamar a Groq (ver la fixture 'servidor').
+La respuesta del bot va dentro del XML (TwiML) que devuelve el webhook."""
 
 import base64
 import hashlib
 import hmac
+import time
+import xml.etree.ElementTree as ET
 from urllib.parse import urlencode
 
 import pytest
@@ -30,7 +33,7 @@ def firmar(parametros: dict, token: str = TOKEN, url: str = URL) -> str:
 def aviso_de_twilio(texto: str, sid: str = "SM1", desde: str = DESTINO, medios: int = 0) -> dict:
     """Arma los campos que manda Twilio cuando llega un mensaje de WhatsApp."""
     return {
-        "MessageSid": sid, "From": desde, "To": "whatsapp:+14155238886",
+        "MessageSid": sid, "From": desde, "To": "whatsapp:+17372508034",
         "Body": texto, "NumMedia": str(medios), "ProfileName": "Ana",
     }
 
@@ -44,55 +47,59 @@ def enviar(cliente, parametros: dict, firma: str | None = "calcular"):
     return cliente.post("/twilio", content=urlencode(parametros), headers=encabezados)
 
 
-def test_responde_desde_el_numero_al_que_escribio_el_cliente(twilio, monkeypatch):
-    modulo, cliente, _ = twilio
-    origenes = []
-    monkeypatch.setattr(modulo, "enviar_twilio", lambda destino, texto, origen=None: origenes.append(origen))
-    parametros = aviso_de_twilio("Hola")
-    parametros["To"] = "whatsapp:+17372508034"  # número asignado a la cuenta de prueba
-    enviar(cliente, parametros)
-    assert origenes == ["whatsapp:+17372508034"]
+def mensajes_de(respuesta) -> list[str]:
+    """Lee los <Message> del TwiML devuelto."""
+    raiz = ET.fromstring(respuesta.content)
+    assert raiz.tag == "Response"
+    return [mensaje.text for mensaje in raiz.findall("Message")]
 
 
-def test_responde_un_mensaje(twilio):
-    _, cliente, enviados = twilio
+def test_responde_dentro_del_twiml(twilio):
+    _, cliente, _ = twilio
     respuesta = enviar(cliente, aviso_de_twilio("¿Tienen ibuprofeno 600?"))
     assert respuesta.status_code == 200
     assert respuesta.headers["content-type"].startswith("text/xml")
-    assert respuesta.text == "<Response></Response>"
-    assert enviados == [("twilio", DESTINO, "Respuesta a: ¿Tienen ibuprofeno 600?")]
+    assert mensajes_de(respuesta) == ["Respuesta a: ¿Tienen ibuprofeno 600?"]
+
+
+def test_escapa_caracteres_especiales_del_xml(twilio, monkeypatch):
+    modulo, cliente, _ = twilio
+    monkeypatch.setattr(modulo, "responder_cliente", lambda clave, texto: "Precio < $ 5.000 & con **receta**")
+    respuesta = enviar(cliente, aviso_de_twilio("Hola"))
+    assert mensajes_de(respuesta) == ["Precio < $ 5.000 & con *receta*"]  # además, negrita de WhatsApp
 
 
 def test_firma_con_tildes_y_simbolos(twilio):
-    _, cliente, enviados = twilio
-    assert enviar(cliente, aviso_de_twilio("¿Cubren el losartán? 50% & más")).status_code == 200
-    assert len(enviados) == 1
+    _, cliente, _ = twilio
+    respuesta = enviar(cliente, aviso_de_twilio("¿Cubren el losartán? 50% & más"))
+    assert respuesta.status_code == 200
+    assert mensajes_de(respuesta) == ["Respuesta a: ¿Cubren el losartán? 50% & más"]
 
 
 @pytest.mark.parametrize("firma", [None, "firma-falsa", firmar(aviso_de_twilio("Hola"), token="otro-token")])
 def test_rechaza_firmas_invalidas(twilio, firma):
-    _, cliente, enviados = twilio
+    modulo, cliente, _ = twilio
     assert enviar(cliente, aviso_de_twilio("Hola"), firma=firma).status_code == 401
-    assert enviados == []
+    assert modulo.conversaciones == {}
 
 
 def test_sin_twilio_configurado_se_rechaza(servidor):
-    _, cliente, enviados = servidor  # sin TWILIO_AUTH_TOKEN
+    _, cliente, _ = servidor  # sin TWILIO_AUTH_TOKEN
     assert enviar(cliente, aviso_de_twilio("Hola")).status_code == 401
-    assert enviados == []
 
 
 def test_ignora_avisos_repetidos(twilio):
-    _, cliente, enviados = twilio
-    enviar(cliente, aviso_de_twilio("Hola", sid="SMrepetido"))
-    enviar(cliente, aviso_de_twilio("Hola", sid="SMrepetido"))
-    assert len(enviados) == 1
+    _, cliente, _ = twilio
+    primera = enviar(cliente, aviso_de_twilio("Hola", sid="SMrepetido"))
+    segunda = enviar(cliente, aviso_de_twilio("Hola", sid="SMrepetido"))
+    assert len(mensajes_de(primera)) == 1
+    assert mensajes_de(segunda) == []
 
 
 def test_mensaje_sin_texto(twilio):
-    _, cliente, enviados = twilio
-    enviar(cliente, aviso_de_twilio("", medios=1))  # por ejemplo, una foto
-    assert "solo puedo leer mensajes de texto" in enviados[0][2]
+    _, cliente, _ = twilio
+    respuesta = enviar(cliente, aviso_de_twilio("", medios=1))  # por ejemplo, una foto
+    assert "solo puedo leer mensajes de texto" in mensajes_de(respuesta)[0]
 
 
 def test_historial_propio_del_canal(twilio):
@@ -103,39 +110,24 @@ def test_historial_propio_del_canal(twilio):
     assert [m["content"] for m in historial if m["role"] == "user"] == ["Hola", "¿Y OSDE?"]
 
 
-def test_enviar_parte_mensajes_largos(monkeypatch):
-    """enviar_twilio real (sin la fixture 'servidor', que lo reemplaza), con la API de Twilio
-    sustituida por una función que guarda los pedidos."""
-    monkeypatch.setenv("GROQ_API_KEY", "clave-de-prueba")
-    import servidor as modulo
+def test_respuestas_largas_en_varios_mensajes(twilio, monkeypatch):
+    modulo, cliente, _ = twilio
+    largo = "\n".join(["linea de prueba"] * 200)  # ~3200 caracteres
+    monkeypatch.setattr(modulo, "responder_cliente", lambda clave, texto: largo)
+    mensajes = mensajes_de(enviar(cliente, aviso_de_twilio("Hola")))
+    assert len(mensajes) == 2
+    assert all(len(mensaje) <= 1600 for mensaje in mensajes)
+    assert "\n".join(mensajes).count("linea de prueba") == 200  # no se pierde texto
 
-    monkeypatch.delenv("TWILIO_WHATSAPP_FROM", raising=False)
-    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC123")
-    monkeypatch.setenv("TWILIO_AUTH_TOKEN", TOKEN)
-    monkeypatch.setattr(modulo, "ESPERA_ENTRE_MENSAJES", 0)
-    pedidos = []
 
-    class RespuestaFalsa:
-        status_code = 201
-        text = ""
+def test_si_el_agente_tarda_avisa_en_vez_de_quedar_en_silencio(twilio, monkeypatch):
+    modulo, cliente, _ = twilio
+    monkeypatch.setattr(modulo, "ESPERA_MAXIMA_TWILIO", 0.1)
 
-    def post_falso(url, **datos):
-        pedidos.append((url, datos))
-        return RespuestaFalsa()
+    def agente_lento(clave, texto):
+        time.sleep(0.5)
+        return "tarde"
 
-    monkeypatch.setattr(modulo.httpx, "post", post_falso)
-
-    texto = "**Precio:** $ 4.100\n" + "\n".join(["linea de prueba"] * 200)  # ~3200 caracteres
-    modulo.enviar_twilio(DESTINO, texto)
-    modulo.enviar_twilio(DESTINO, "Hola", origen="whatsapp:+17372508034")
-
-    assert len(pedidos) == 4
-    assert pedidos[-1][1]["data"]["From"] == "whatsapp:+17372508034"
-    pedidos = pedidos[:3]
-    url, datos = pedidos[0]
-    assert url == "https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json"
-    assert datos["auth"] == ("AC123", TOKEN)
-    assert datos["data"]["From"] == "whatsapp:+14155238886"
-    assert datos["data"]["To"] == DESTINO
-    assert datos["data"]["Body"].startswith("*Precio:* $ 4.100")
-    assert all(len(d["data"]["Body"]) <= 1600 for _, d in pedidos)
+    monkeypatch.setattr(modulo, "responder_cliente", agente_lento)
+    mensajes = mensajes_de(enviar(cliente, aviso_de_twilio("Hola")))
+    assert mensajes == [modulo.MENSAJE_DEMORA]

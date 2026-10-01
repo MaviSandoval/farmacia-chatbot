@@ -10,6 +10,8 @@ services:
     startCommand: uvicorn servidor:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     envVars:
+      - key: PYTHONUNBUFFERED   # para que los print aparezcan enseguida en los logs
+        value: "1"
       - key: GROQ_API_KEY
         sync: false
       - key: WHATSAPP_TOKEN
@@ -19,8 +21,6 @@ services:
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
       - key: WHATSAPP_APP_SECRET
-        sync: false
-      - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
         sync: false
