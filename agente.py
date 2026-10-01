@@ -11,6 +11,7 @@ from herramientas import (
     buscar_alternativas,
     buscar_producto,
     consultar_cobertura,
+    info_farmacia,
     listar_obras_sociales,
 )
 
@@ -36,7 +37,8 @@ MODELO = "openai/gpt-oss-120b"
 MAX_PASOS = 5  # tope de idas y vueltas con herramientas, para evitar loops infinitos
 
 PROMPT_SISTEMA = """Sos el asistente virtual de atención al cliente de una farmacia.
-Respondé en español rioplatense (usá "vos": querés, podés, acercate), de forma breve y amable.
+Respondé en español rioplatense, de forma breve y amable. Usá siempre "vos", nunca "tú" ni
+"usted": querés, podés, necesitás, tenés, acercate, consultá.
 La farmacia vende medicamentos, perfumería, higiene, dermocosmética, productos para bebés y más.
 
 Reglas:
@@ -60,8 +62,19 @@ Reglas:
   farmacéutico o el médico.
 - No des diagnósticos, no recomiendes medicamentos para síntomas ni indiques dosis: derivá al
   farmacéutico o al médico. Podés informar qué productos hay de una categoría si te lo piden.
+- Para direcciones, teléfonos, horarios, medios de pago o servicios usá info_farmacia.
+  Si preguntan si está abierto, respondé según abierta_ahora y horario_de_hoy de cada sucursal.
+- Recordá lo que el cliente ya dijo en la conversación (por ejemplo, su obra social y plan) y
+  usalo sin volver a preguntar.
 - Si la consulta no tiene que ver con la farmacia, decilo amablemente."""
 
+
+# Primer mensaje que ve el cliente (lo usan la web y los bots de mensajería)
+SALUDO = (
+    "¡Hola! 👋 Soy el asistente virtual de la farmacia. Puedo ayudarte con precios y stock de "
+    "productos, coberturas de obras sociales, alternativas, horarios y medios de pago. "
+    "¿Qué necesitás?"
+)
 
 # Descripción de las herramientas en formato JSON Schema: es lo que "lee" el modelo
 HERRAMIENTAS = [
@@ -116,6 +129,17 @@ HERRAMIENTAS = [
     {
         "type": "function",
         "function": {
+            "name": "info_farmacia",
+            "description": (
+                "Devuelve las sucursales (dirección, teléfono, horarios y si están abiertas ahora), "
+                "los medios de pago y los servicios de la farmacia."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "buscar_alternativas",
             "description": "Busca productos con stock de la misma categoría que el producto indicado.",
             "parameters": {
@@ -134,6 +158,7 @@ FUNCIONES = {
     "buscar_producto": buscar_producto,
     "consultar_cobertura": consultar_cobertura,
     "listar_obras_sociales": listar_obras_sociales,
+    "info_farmacia": info_farmacia,
     "buscar_alternativas": buscar_alternativas,
 }
 
@@ -186,7 +211,9 @@ def responder(mensajes: list[dict]) -> str:
             resultado = ejecutar_herramienta(llamada.function.name, llamada.function.arguments)
             mensajes.append({"role": "tool", "tool_call_id": llamada.id, "content": resultado})
 
-    return "Perdón, no pude resolver tu consulta. ¿Podés reformularla?"
+    texto = "Perdón, no pude resolver tu consulta. ¿Podés reformularla?"
+    mensajes.append({"role": "assistant", "content": texto})
+    return texto
 
 
 def main() -> None:

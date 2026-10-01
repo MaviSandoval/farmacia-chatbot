@@ -12,6 +12,7 @@ import re
 import sqlite3
 import unicodedata
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 RUTA_BD = Path(__file__).parent / "farmacia_demo.db"
@@ -24,6 +25,9 @@ PALABRAS_IGNORADAS = {
     "unos", "unas", "algo", "que", "tienen", "tenes", "hay", "x", "por", "al",
     "remedio", "remedios", "necesito", "busco", "quiero", "venden",
 }
+
+DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+ZONA_ARGENTINA = timezone(timedelta(hours=-3))  # Argentina no usa horario de verano
 
 MOTIVO_SIN_COBERTURA = ("Es de venta libre o no es un medicamento: las obras sociales "
                         "solo cubren medicamentos bajo receta.")
@@ -319,6 +323,61 @@ def buscar_alternativas(producto: str) -> list[dict]:
     return filas
 
 
+# ---------------------------------------------------------------- información de la farmacia
+
+def _horarios_de(sucursal_id: int) -> dict[str, dict]:
+    """Devuelve {día: {'apertura', 'cierre'}} de una sucursal. Los días que no figuran, cierra."""
+    filas = _consultar("SELECT dia, apertura, cierre FROM horarios WHERE sucursal_id = ?", [sucursal_id])
+    return {fila["dia"]: fila for fila in filas}
+
+
+def _info_farmacia(ahora: datetime) -> dict:
+    """Arma la información de la farmacia para un momento dado (separado para poder testearlo)."""
+    hoy = DIAS_SEMANA[ahora.weekday()]  # weekday(): 0 = lunes
+    hora = ahora.strftime("%H:%M")
+
+    sucursales = []
+    for sucursal in _consultar("SELECT id, nombre, direccion, telefono FROM sucursales ORDER BY id"):
+        horarios = _horarios_de(sucursal["id"])
+        de_hoy = horarios.get(hoy)
+        sucursales.append({
+            "nombre": sucursal["nombre"],
+            "direccion": sucursal["direccion"],
+            "telefono": sucursal["telefono"],
+            "horario_de_hoy": f"{de_hoy['apertura']} a {de_hoy['cierre']}" if de_hoy else "Cerrado",
+            # Las horas 'HH:MM' se pueden comparar como texto: '08:00' < '21:30'
+            "abierta_ahora": bool(de_hoy and de_hoy["apertura"] <= hora < de_hoy["cierre"]),
+            "horarios": [
+                f"{dia}: {horarios[dia]['apertura']} a {horarios[dia]['cierre']}" if dia in horarios
+                else f"{dia}: cerrado"
+                for dia in DIAS_SEMANA
+            ],
+        })
+
+    medios_pago = [
+        f"{fila['nombre']} ({fila['detalle']})" if fila["detalle"] else fila["nombre"]
+        for fila in _consultar("SELECT nombre, detalle FROM medios_pago ORDER BY id")
+    ]
+    servicios = [
+        f"{fila['nombre']}: {fila['detalle']}"
+        for fila in _consultar("SELECT nombre, detalle FROM servicios ORDER BY id")
+    ]
+
+    return {
+        "dia_y_hora_actual": f"{hoy} {hora}",
+        "sucursales": sucursales,
+        "medios_de_pago": medios_pago,
+        "servicios": servicios,
+        "aclaracion": "Los horarios pueden cambiar en feriados.",
+    }
+
+
+def info_farmacia() -> dict:
+    """Devuelve sucursales (dirección, teléfono, horarios y si están abiertas ahora),
+    medios de pago y servicios de la farmacia."""
+    return _info_farmacia(datetime.now(ZONA_ARGENTINA))
+
+
 if __name__ == "__main__":
     def mostrar(titulo: str, datos: list | dict) -> None:
         print(f"\n=== {titulo} ===")
@@ -334,3 +393,4 @@ if __name__ == "__main__":
     mostrar("obra social inexistente", consultar_cobertura("enalapril", "OSPE"))
     mostrar("alternativas: 'diclofenac 75'", buscar_alternativas("diclofenac 75"))
     mostrar("inexistente: 'xyz'", buscar_producto("xyz"))
+    mostrar("información de la farmacia", info_farmacia())

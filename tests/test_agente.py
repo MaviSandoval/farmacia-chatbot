@@ -114,6 +114,9 @@ def test_loop_se_corta_si_no_termina(agente, monkeypatch):
     ]
     monkeypatch.setattr(agente, "cliente", ClienteFalso(pedidos_infinitos))
 
-    texto = agente.responder([{"role": "user", "content": "hola"}])
+    mensajes = [{"role": "user", "content": "hola"}]
+    texto = agente.responder(mensajes)
 
     assert "no pude resolver" in texto
+    # El mensaje de disculpa también queda en el historial, para que la interfaz lo muestre
+    assert mensajes[-1] == {"role": "assistant", "content": texto}

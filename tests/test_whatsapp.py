@@ -44,6 +44,13 @@ def test_verificacion_con_token_incorrecto_se_rechaza(servidor):
     assert respuesta.status_code == 403
 
 
+def test_sin_whatsapp_configurado_la_verificacion_se_rechaza(servidor, monkeypatch):
+    _, cliente, _ = servidor
+    monkeypatch.delenv("WHATSAPP_VERIFY_TOKEN")
+    respuesta = cliente.get("/whatsapp", params={"hub.mode": "subscribe", "hub.challenge": "12345"})
+    assert respuesta.status_code == 403
+
+
 # ---------------------------------------------------------------- mensajes
 
 def test_responde_un_mensaje_de_texto(servidor):
