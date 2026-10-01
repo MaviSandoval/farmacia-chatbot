@@ -44,6 +44,16 @@ def enviar(cliente, parametros: dict, firma: str | None = "calcular"):
     return cliente.post("/twilio", content=urlencode(parametros), headers=encabezados)
 
 
+def test_responde_desde_el_numero_al_que_escribio_el_cliente(twilio, monkeypatch):
+    modulo, cliente, _ = twilio
+    origenes = []
+    monkeypatch.setattr(modulo, "enviar_twilio", lambda destino, texto, origen=None: origenes.append(origen))
+    parametros = aviso_de_twilio("Hola")
+    parametros["To"] = "whatsapp:+17372508034"  # número asignado a la cuenta de prueba
+    enviar(cliente, parametros)
+    assert origenes == ["whatsapp:+17372508034"]
+
+
 def test_responde_un_mensaje(twilio):
     _, cliente, enviados = twilio
     respuesta = enviar(cliente, aviso_de_twilio("¿Tienen ibuprofeno 600?"))
@@ -117,8 +127,11 @@ def test_enviar_parte_mensajes_largos(monkeypatch):
 
     texto = "**Precio:** $ 4.100\n" + "\n".join(["linea de prueba"] * 200)  # ~3200 caracteres
     modulo.enviar_twilio(DESTINO, texto)
+    modulo.enviar_twilio(DESTINO, "Hola", origen="whatsapp:+17372508034")
 
-    assert len(pedidos) == 3
+    assert len(pedidos) == 4
+    assert pedidos[-1][1]["data"]["From"] == "whatsapp:+17372508034"
+    pedidos = pedidos[:3]
     url, datos = pedidos[0]
     assert url == "https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json"
     assert datos["auth"] == ("AC123", TOKEN)

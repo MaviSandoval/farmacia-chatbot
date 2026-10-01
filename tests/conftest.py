@@ -39,7 +39,8 @@ def servidor(monkeypatch):
     enviados = []
     monkeypatch.setattr(modulo, "enviar_whatsapp", lambda numero, texto: enviados.append(("whatsapp", numero, texto)))
     monkeypatch.setattr(modulo, "enviar_telegram", lambda chat, texto: enviados.append(("telegram", chat, texto)))
-    monkeypatch.setattr(modulo, "enviar_twilio", lambda destino, texto: enviados.append(("twilio", destino, texto)))
+    monkeypatch.setattr(modulo, "enviar_twilio",
+                        lambda destino, texto, origen=None: enviados.append(("twilio", destino, texto)))
     monkeypatch.setattr(modulo, "mostrar_escribiendo", lambda chat: None)
 
     def responder_falso(mensajes):

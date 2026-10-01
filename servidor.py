@@ -16,7 +16,7 @@ Variables de entorno (en .env o en el hosting); cada canal se activa si están s
     WHATSAPP_APP_SECRET       (opcional) clave secreta de la app de Meta, para validar los avisos
     TWILIO_ACCOUNT_SID        identificador de la cuenta de Twilio (empieza con AC)
     TWILIO_AUTH_TOKEN         clave de la cuenta de Twilio; también valida que los avisos vienen de Twilio
-    TWILIO_WHATSAPP_FROM      (opcional) número de WhatsApp de Twilio; por defecto, el del Sandbox
+    TWILIO_WHATSAPP_FROM      (opcional) número de Twilio para responder si el aviso no lo trae
     TELEGRAM_TOKEN            token del bot que da @BotFather
     TELEGRAM_SECRET           (opcional) texto que inventás vos, para validar los avisos de Telegram
     URL_PUBLICA               (opcional) URL del servidor; en Render se usa RENDER_EXTERNAL_URL solo
@@ -215,11 +215,13 @@ def firma_twilio_valida(url: str, parametros: dict[str, str], firma: str | None)
     return hmac.compare_digest(esperada, firma)
 
 
-def enviar_twilio(destino: str, texto: str) -> None:
-    """Envía un mensaje de WhatsApp con la API de Twilio. destino viene como 'whatsapp:+549...'."""
+def enviar_twilio(destino: str, texto: str, origen: str | None = None) -> None:
+    """Envía un mensaje de WhatsApp con la API de Twilio. destino viene como 'whatsapp:+549...'.
+    origen es el número de Twilio desde el que se responde: por defecto, el mismo al que escribió
+    el cliente; si no se conoce, TWILIO_WHATSAPP_FROM o el número clásico del Sandbox."""
     sid = os.environ["TWILIO_ACCOUNT_SID"]
     url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
-    origen = os.environ.get("TWILIO_WHATSAPP_FROM", NUMERO_SANDBOX_TWILIO)
+    origen = origen or os.environ.get("TWILIO_WHATSAPP_FROM", NUMERO_SANDBOX_TWILIO)
     partes = partir_mensaje(a_formato_whatsapp(texto), MAX_LARGO_TWILIO)
     for indice, parte in enumerate(partes):
         if indice:
@@ -233,12 +235,13 @@ def enviar_twilio(destino: str, texto: str) -> None:
 def procesar_twilio(parametros: dict[str, str]) -> None:
     """Responde un mensaje que llegó por Twilio. Corre en segundo plano."""
     destino = parametros["From"]
+    origen = parametros.get("To")  # se responde desde el número de Twilio al que escribió el cliente
     texto = parametros.get("Body", "").strip()
     if not texto:  # foto, audio, ubicación, etc.
-        enviar_twilio(destino, MENSAJE_SOLO_TEXTO)
+        enviar_twilio(destino, MENSAJE_SOLO_TEXTO, origen)
         return
     print(f"  [{destino}] {texto}")
-    enviar_twilio(destino, responder_cliente(f"twilio:{destino}", texto))
+    enviar_twilio(destino, responder_cliente(f"twilio:{destino}", texto), origen)
 
 
 # ================================================================ Telegram
