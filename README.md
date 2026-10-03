@@ -9,7 +9,7 @@ El mismo agente atiende por **tres canales**: una web, Telegram y WhatsApp.
 | Canal | Cómo probarlo |
 |---|---|
 | 🌐 Web | [farmacia-chatbot-mavi.streamlit.app](https://farmacia-chatbot-mavi.streamlit.app) |
-| ✈️ Telegram | [t.me/USUARIO_DEL_BOT](https://t.me/USUARIO_DEL_BOT) |
+| ✈️ Telegram | [t.me/farmacia_mavi_bot](https://t.me/farmacia_mavi_bot) |
 | 💬 WhatsApp | Funciona con la API oficial de Meta, con un número de prueba que solo responde a números autorizados. Se puede ver en el video. |
 
 🎥 **Video de demostración:** [el bot respondiendo por WhatsApp](https://youtube.com/shorts/c4uknxSMfYY)
