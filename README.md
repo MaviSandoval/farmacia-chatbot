@@ -12,7 +12,7 @@ El mismo agente atiende por **tres canales**: una web, Telegram y WhatsApp.
 | ✈️ Telegram | [t.me/USUARIO_DEL_BOT](https://t.me/USUARIO_DEL_BOT) |
 | 💬 WhatsApp | Funciona con la API oficial de Meta, con un número de prueba que solo responde a números autorizados. Se puede ver en el video. |
 
-🎥 **Video de demostración:** LINK_AL_VIDEO
+🎥 **Video de demostración:** [el bot respondiendo por WhatsApp](https://youtube.com/shorts/c4uknxSMfYY)
 
 > Los bots de Telegram y WhatsApp corren en un servidor gratuito que se duerme tras 15 minutos sin uso: el primer mensaje puede tardar hasta un minuto en responder.
 
