@@ -25,6 +25,14 @@ def aviso_de_meta(texto: str, numero: str = NUMERO, id_: str = "wamid.1", tipo: 
     }
 
 
+def test_pagina_de_privacidad(servidor):
+    _, cliente, _ = servidor
+    respuesta = cliente.get("/privacidad")
+    assert respuesta.status_code == 200
+    assert respuesta.headers["content-type"].startswith("text/html")
+    assert "Política de privacidad" in respuesta.text
+
+
 # ---------------------------------------------------------------- verificación del webhook
 
 def test_verificacion_con_token_correcto_devuelve_el_challenge(servidor):

@@ -32,12 +32,13 @@ from urllib.parse import parse_qsl
 from xml.sax.saxutils import escape
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
 from agente import PROMPT_SISTEMA, SALUDO, responder
 
@@ -308,6 +309,12 @@ app = FastAPI(title="Asistente de Farmacia - Mensajería", lifespan=ciclo_de_vid
 def estado() -> dict:
     """Permite comprobar que el servidor está andando (y despertarlo si el hosting lo durmió)."""
     return {"estado": "ok", "servicio": "Asistente de Farmacia - WhatsApp y Telegram"}
+
+
+@app.get("/privacidad", response_class=HTMLResponse)
+def privacidad() -> str:
+    """Política de privacidad de la demo (Meta la exige para publicar la app de WhatsApp)."""
+    return (Path(__file__).parent / "privacidad.html").read_text(encoding="utf-8")
 
 
 @app.get("/whatsapp", response_class=PlainTextResponse)
